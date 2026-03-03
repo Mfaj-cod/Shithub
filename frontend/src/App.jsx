@@ -83,7 +83,7 @@ function App() {
       const token = getAuthToken();
       const localUser = getAuthUser();
 
-      if (!token || !localUser?.username) {
+      if (!token) {
         if (!isCancelled) {
           clearAuthSession();
           setIsAuthed(false);
@@ -92,34 +92,43 @@ function App() {
         return;
       }
 
-      try {
-        const me = await getMe({ skipAuthInvalidEvent: true });
-        if (isCancelled) {
-          return;
-        }
-
-        setAuthUser({
-          username: me.username,
-          email: me.email,
-          avatar_url: me.avatar_url ?? null
-        });
-        setIsAuthed(true);
-      } catch (err) {
-        if (isCancelled) {
-          return;
-        }
-
-        const status = err && typeof err === "object" ? err.status : undefined;
-        if (status === 401) {
-          clearAuthSession();
-          setIsAuthed(false);
-        } else {
-          setIsAuthed(Boolean(localUser?.username));
-        }
-      } finally {
+      if (localUser?.username) {
         if (!isCancelled) {
+          setIsAuthed(true);
           setAuthChecked(true);
         }
+        return;
+      } else {
+        try {
+          const me = await getMe({ skipAuthInvalidEvent: true });
+          if (isCancelled) {
+            return;
+          }
+
+          setAuthUser({
+            username: me.username,
+            email: me.email,
+            avatar_url: me.avatar_url ?? null
+          });
+          setIsAuthed(true);
+        } catch (err) {
+          if (isCancelled) {
+            return;
+          }
+
+          const status = err && typeof err === "object" ? err.status : undefined;
+          if (status === 401) {
+            clearAuthSession();
+            setIsAuthed(false);
+          } else {
+            setIsAuthed(false);
+          }
+        } finally {
+          if (!isCancelled) {
+            setAuthChecked(true);
+          }
+        }
+        return;
       }
     };
 
