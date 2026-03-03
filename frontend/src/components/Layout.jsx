@@ -268,10 +268,10 @@ function Layout({ children, authChecked = false, isAuthed = false }) {
 
     try {
       const result = await triggerAiBuild(authUser.username, repoName, prompt);
-      setBuildInfo(`Build queued for ${authUser.username}/${repoName}. Job ID: ${result.job_id}`);
+      setBuildInfo(`Build queued for ${authUser.username}/${repoName}.`);
       setIsBuildDialogOpen(false);
       navigate(`/repo/${encodeURIComponent(authUser.username)}/${encodeURIComponent(repoName)}/actions`, {
-        state: { flashInfo: `Build queued. Job ID: ${result.job_id}` }
+        state: { flashInfo: "Build queued." }
       });
     } catch (err) {
       setBuildError(err?.message || "Failed to queue build job");

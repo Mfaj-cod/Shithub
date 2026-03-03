@@ -41,5 +41,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 
+/repos/
+*/repos/
+
 /tests/
 */tests/

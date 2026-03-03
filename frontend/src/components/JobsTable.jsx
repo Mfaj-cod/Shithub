@@ -1,5 +1,16 @@
 import StatusPill from "./StatusPill";
 
+const IST_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 function formatDate(dateValue) {
   if (!dateValue) {
     return "n/a";
@@ -8,7 +19,7 @@ function formatDate(dateValue) {
   if (Number.isNaN(date.getTime())) {
     return dateValue;
   }
-  return date.toLocaleString();
+  return `${IST_DATE_FORMATTER.format(date)} IST`;
 }
 
 function shortId(id) {
