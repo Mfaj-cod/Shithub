@@ -1,0 +1,15 @@
+fastapi
+pydantic
+pydantic-settings
+sqlalchemy
+typer
+requests
+groq
+python-dotenv
+celery
+redis
+passlib
+PyJWT
+email-validator
+bcrypt>=4.3.0
+python-multipart
