@@ -6,6 +6,12 @@
 - Optional: Redis + Celery worker running for AI README jobs
 - If `tailwind.config.js` or theme tokens were changed, restart Vite (`npm run dev`) and hard-refresh browser once.
 
+## Authentication
+1. Register with username/email/password and verify you are signed in immediately after submit.
+2. Login with email/password and verify no OTP prompt appears.
+3. Hit legacy routes (`/auth/register/verify`, `/auth/login/verify`, `/auth/otp/resend`) and verify they return `410`.
+4. Confirm `/auth/me` returns `is_email_verified: true` after both register and login flows.
+
 ## Core UI Flow
 1. Open the app and confirm owner defaults to saved value or `honey`.
 2. Change owner and refresh browser; confirm owner persists.

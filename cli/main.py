@@ -173,23 +173,14 @@ def login(
     if not password:
         password = _prompt_password_with_asterisks()
 
-    start = _request(
+    result = _request(
         "POST",
         "/auth/login/start",
         json={"email": email.strip(), "password": password},
     )
 
-    typer.secho("OTP generated, Check email.", fg=typer.colors.YELLOW)
-    otp = typer.prompt("Enter OTP").strip()
-
-    verified = _request(
-        "POST",
-        "/auth/login/verify",
-        json={"challenge_id": start["challenge_id"], "otp": otp},
-    )
-
-    token = verified.get("access_token")
-    user = verified.get("user", {})
+    token = result.get("access_token")
+    user = result.get("user", {})
 
     if not token:
         typer.secho("Login failed: missing access token in response.", fg=typer.colors.RED)

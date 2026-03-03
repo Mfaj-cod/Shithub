@@ -51,13 +51,11 @@ def register_start(payload: RegisterStartRequest):
 
 @router.post("/register/verify")
 def register_verify(payload: RegisterVerifyRequest):
-    try:
-        return auth_service.verify_registration(
-            challenge_id=payload.challenge_id,
-            otp=payload.otp,
-        )
-    except AuthServiceError as exc:
-        _raise_auth_error(exc)
+    _ = payload
+    raise HTTPException(
+        status_code=410,
+        detail="OTP verification is temporarily disabled. Use /auth/register/start or /auth/login/start.",
+    )
 
 
 @router.post("/login/start")
@@ -73,21 +71,20 @@ def login_start(payload: LoginStartRequest):
 
 @router.post("/login/verify")
 def login_verify(payload: LoginVerifyRequest):
-    try:
-        return auth_service.verify_login(
-            challenge_id=payload.challenge_id,
-            otp=payload.otp,
-        )
-    except AuthServiceError as exc:
-        _raise_auth_error(exc)
+    _ = payload
+    raise HTTPException(
+        status_code=410,
+        detail="OTP verification is temporarily disabled. Use /auth/register/start or /auth/login/start.",
+    )
 
 
 @router.post("/otp/resend")
 def resend_otp(payload: ResendOTPRequest):
-    try:
-        return auth_service.resend_otp(payload.challenge_id)
-    except AuthServiceError as exc:
-        _raise_auth_error(exc)
+    _ = payload
+    raise HTTPException(
+        status_code=410,
+        detail="OTP verification is temporarily disabled. Use /auth/register/start or /auth/login/start.",
+    )
 
 
 @router.get("/me")

@@ -155,7 +155,7 @@ function GuestLandingView({ authUser, username }) {
       <div className="rounded-lg border border-gh-border bg-gh-panel p-6">
         <h3 className="text-xl font-semibold text-gh-text">Get started</h3>
         <ol className="mt-4 space-y-2 text-sm text-gh-muted">
-          <li>1. Create an account with email OTP verification.</li>
+          <li>1. Create an account with email and password.</li>
           <li>2. Create repositories under your namespace.</li>
           <li>3. Use sh*tAI to write code or generate README, then monitor jobs/logs.</li>
         </ol>

@@ -5,7 +5,6 @@ from pydantic import field_validator   # type: ignore
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 BUG_API_KEY = os.getenv("BUG_API_KEY")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 
 class Settings(BaseSettings):
     BASE_URL: str = "http://127.0.0.1:8000"
@@ -22,7 +21,6 @@ class Settings(BaseSettings):
     OTP_EXPIRE_MINUTES: int = 10
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
     OTP_MAX_ATTEMPTS: int = 5
-    RESEND_API_KEY: str | None = None
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
     SMTP_USERNAME: str | None = None

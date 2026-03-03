@@ -8,8 +8,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
-import resend
-from backend.core.settings import settings
+
 try:
     import bcrypt as bcrypt_lib  # type: ignore
 except Exception:  # pragma: no cover
@@ -115,6 +114,15 @@ class AuthService:
         finally:
             db.close()
 
+    def _build_auth_payload(self, db, user: User) -> dict[str, Any]:
+        access_token = self.create_access_token(user)
+        profile = self._get_profile(db, user.id)
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": self.build_user_payload(user, profile),
+        }
+
     def hash_password(self, password: str) -> str:
         return self.password_context.hash(password)
 
@@ -185,7 +193,7 @@ class AuthService:
                 user.username = username
                 user.email = email
                 user.password_hash = self.hash_password(password)
-                user.is_email_verified = False
+                user.is_email_verified = True
                 user.updated_at = now
             else:
                 user = User(
@@ -193,17 +201,14 @@ class AuthService:
                     username=username,
                     email=email,
                     password_hash=self.hash_password(password),
-                    is_email_verified=False,
+                    is_email_verified=True,
                     created_at=now,
                     updated_at=now,
                 )
                 db.add(user)
 
-            challenge, raw_otp = self._create_challenge(db, user.id, email, self.OTP_PURPOSE_REGISTER)
             db.commit()
-
-            self._send_otp_email(email=email, purpose=self.OTP_PURPOSE_REGISTER, otp_code=raw_otp)
-            return self._otp_payload(challenge)
+            return self._build_auth_payload(db, user)
         finally:
             db.close()
 
@@ -247,14 +252,14 @@ class AuthService:
             if not self.verify_password(password, user.password_hash):
                 raise AuthServiceError(status_code=401, detail="Invalid credentials")
 
+            now = self._utcnow()
             if not user.is_email_verified:
-                raise AuthServiceError(status_code=403, detail="Email is not verified")
+                user.is_email_verified = True
 
-            challenge, raw_otp = self._create_challenge(db, user.id, user.email, self.OTP_PURPOSE_LOGIN)
+            user.last_login_at = now
+            user.updated_at = now
             db.commit()
-
-            self._send_otp_email(email=user.email, purpose=self.OTP_PURPOSE_LOGIN, otp_code=raw_otp)
-            return self._otp_payload(challenge)
+            return self._build_auth_payload(db, user)
         finally:
             db.close()
 
@@ -434,77 +439,47 @@ class AuthService:
 
         return challenge
 
-    # def _send_otp_email(self, email: str, purpose: str, otp_code: str):
-    #     subject = "Sh*thub verification code"
-    #     action = "login" if purpose == self.OTP_PURPOSE_LOGIN else "registration"
-    #     body = (
-    #         f"Welcome to Sh*thub!\n\n"
-    #         f"Sh*thub is a collaborative platform that helps developers streamline their workflow, manage projects efficiently. Build with sh*tAI, fix bugs with bugAI and automate everything from building your sh*t to shipping your sh*t.\n\n"
-    #         f"Use the following OTP code to complete your {action}:\n\n"
-    #         f"Your Sh*thub {action} OTP is: {otp_code}\n"
-    #         f"It expires in {settings.OTP_EXPIRE_MINUTES} minutes."
-    #     )
-
-    #     smtp_configured = bool(settings.SMTP_HOST and settings.SMTP_FROM_EMAIL)
-    #     if not smtp_configured:
-    #         self._handle_dev_fallback(email, otp_code)
-    #         return
-
-    #     message = EmailMessage()
-    #     message["Subject"] = subject
-    #     message["From"] = settings.SMTP_FROM_EMAIL
-    #     message["To"] = email
-    #     message.set_content(body)
-
-    #     try:
-    #         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
-    #             if settings.SMTP_USE_TLS:
-    #                 smtp.starttls()
-    #             if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-    #                 smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-    #             smtp.send_message(message)
-    #     except Exception as exc:
-    #         if settings.AUTH_DEV_OTP_LOG:
-    #             logger.warning("SMTP failed, using dev OTP log fallback: %s", exc)
-    #             self._handle_dev_fallback(email, otp_code)
-    #             return
-    #         raise AuthServiceError(status_code=500, detail="Unable to send OTP email") from exc
-
-    # def _handle_dev_fallback(self, email: str, otp_code: str):
-    #     if settings.AUTH_DEV_OTP_LOG:
-    #         logger.warning("DEV OTP for %s: %s", email, otp_code)
-    #         return
-    #     raise AuthServiceError(status_code=500, detail="SMTP is not configured")
-
-
     def _send_otp_email(self, email: str, purpose: str, otp_code: str):
-        subject = "Shithub verification code"
+        subject = "Sh*thub verification code"
         action = "login" if purpose == self.OTP_PURPOSE_LOGIN else "registration"
+        body = (
+            f"Welcome to Sh*thub!\n\n"
+            f"Sh*thub is a collaborative platform that helps developers streamline their workflow, manage projects efficiently. Build with sh*tAI, fix bugs with bugAI and automate everything from building your sh*t to shipping your sh*t.\n\n"
+            f"Use the following OTP code to complete your {action}:\n\n"
+            f"Your Sh*thub {action} OTP is: {otp_code}\n"
+            f"It expires in {settings.OTP_EXPIRE_MINUTES} minutes."
+        )
 
-        html_content = f"""
-        <h2>Welcome to Shithub</h2>
-        <p>Sh*thub is a collaborative platform that helps developers streamline their workflow, manage projects efficiently. Build with sh*tAI, fix bugs with bugAI and automate everything from building your sh*t to shipping your sh*t.\n\n</p>
-        <p>Use the OTP below to complete your {action}:</p>
-        <h1>{otp_code}</h1>
-        <p>Expires in {settings.OTP_EXPIRE_MINUTES} minutes.</p>
-        """
-
-        if not settings.RESEND_API_KEY:
+        smtp_configured = bool(settings.SMTP_HOST and settings.SMTP_FROM_EMAIL)
+        if not smtp_configured:
             self._handle_dev_fallback(email, otp_code)
             return
 
-        resend.api_key = settings.RESEND_API_KEY
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = settings.SMTP_FROM_EMAIL
+        message["To"] = email
+        message.set_content(body)
 
         try:
-            resend.Emails.send({
-                "from": "Shithub <onboarding@resend.dev>",
-                "to": email,
-                "subject": subject,
-                "html": html_content,
-            })
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
+                if settings.SMTP_USE_TLS:
+                    smtp.starttls()
+                if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                    smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                smtp.send_message(message)
         except Exception as exc:
-            logger.warning("Resend failed, using dev fallback: %s", exc)
-            self._handle_dev_fallback(email, otp_code)
+            if settings.AUTH_DEV_OTP_LOG:
+                logger.warning("SMTP failed, using dev OTP log fallback: %s", exc)
+                self._handle_dev_fallback(email, otp_code)
+                return
+            raise AuthServiceError(status_code=500, detail="Unable to send OTP email") from exc
+
+    def _handle_dev_fallback(self, email: str, otp_code: str):
+        if settings.AUTH_DEV_OTP_LOG:
+            logger.warning("DEV OTP for %s: %s", email, otp_code)
+            return
+        raise AuthServiceError(status_code=500, detail="SMTP is not configured")
 
 
 auth_service = AuthService()
