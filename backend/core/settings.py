@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     BUG_API_KEY: str | None = None
     BUGAI_MODEL: str = "llama-3.3-70b-versatile"
-    FRONTEND_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    FRONTEND_ORIGINS: list[str] = ["https://shithub-frontend.onrender.com", "https://shithub-frontend.onrender.com"]
     JWT_SECRET_KEY: str = "5d6yv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
