@@ -2,6 +2,9 @@ services:
   - type: redis
     name: shithub-redis
     plan: free
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: allow all
 
   - type: web
     name: shithub-api
@@ -10,11 +13,6 @@ services:
     autoDeploy: true
     plan: free
     healthCheckPath: /docs
-
-    disk:
-      name: shithub-data
-      mountPath: /data
-      sizeGB: 5
 
     envVars:
       - key: REDIS_URL
@@ -26,11 +24,11 @@ services:
       - key: BASE_URL
         value: https://shithub-api.onrender.com
       - key: DATABASE_URL
-        value: sqlite:////data/shithub.db
+        value: sqlite:///shithub.db
       - key: REPO_ROOT
-        value: /data/repos
+        value: /tmp/repos
       - key: MEDIA_ROOT
-        value: /data/media
+        value: /tmp/media
       - key: FRONTEND_ORIGINS
         value: https://shithub-frontend.onrender.com
       - key: JWT_SECRET_KEY
@@ -57,17 +55,5 @@ services:
     autoDeploy: true
     plan: free
     envVars:
-      - key: BACKEND_ORIGIN 
+      - key: BACKEND_ORIGIN
         value: https://shithub-api.onrender.com
-
-  - type: worker
-    name: shithub-worker
-    env: docker
-    dockerfilePath: ./Dockerfile.backend
-    startCommand: celery -A backend.worker.celery_app.celery worker --pool=solo --loglevel=info
-    envVars:
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: shithub-redis
-          property: connectionString
