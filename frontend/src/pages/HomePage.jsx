@@ -109,14 +109,13 @@ function HomePage() {
 
   const ensureMutationAccess = () => {
     const token = getAuthToken();
-    const authUser = getAuthUser();
-    if (!token || !authUser?.username) {
-      clearAuthSession();
+    if (!token) {
       navigate(loginRedirectPath);
       return false;
     }
 
-    if (authUser.username !== decodedOwner) {
+    const authUser = getAuthUser();
+    if (authUser?.username && authUser.username !== decodedOwner) {
       setError(getNamespaceErrorMessage());
       return false;
     }
@@ -127,8 +126,14 @@ function HomePage() {
   const resolveMutationError = (err) => {
     const status = err && typeof err === "object" ? err.status : undefined;
     const message = err instanceof Error ? err.message : "Request failed";
+    const normalized = message.toLowerCase();
+    const shouldTreatAsExpiredSession =
+      status === 401 &&
+      (normalized.includes("invalid authentication token") ||
+        normalized.includes("not authenticated") ||
+        normalized.includes("user not found"));
 
-    if (status === 401 || message.toLowerCase().includes("invalid authentication token")) {
+    if (shouldTreatAsExpiredSession) {
       clearAuthSession();
       navigate(loginRedirectPath);
       return "Session expired. Please sign in again.";

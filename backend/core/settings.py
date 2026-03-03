@@ -18,16 +18,6 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "5d6yv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
-    OTP_EXPIRE_MINUTES: int = 10
-    OTP_RESEND_COOLDOWN_SECONDS: int = 60
-    OTP_MAX_ATTEMPTS: int = 5
-    SMTP_HOST: str | None = None
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: str | None = None
-    SMTP_PASSWORD: str | None = None
-    SMTP_FROM_EMAIL: str | None = None
-    SMTP_USE_TLS: bool = True
-    AUTH_DEV_OTP_LOG: bool = True
     MEDIA_ROOT: str = "./media"
     AVATAR_SUBDIR: str = "avatars"
     AVATAR_MAX_BYTES: int = 2_097_152

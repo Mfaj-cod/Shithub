@@ -8,9 +8,8 @@
 
 ## Authentication
 1. Register with username/email/password and verify you are signed in immediately after submit.
-2. Login with email/password and verify no OTP prompt appears.
-3. Hit legacy routes (`/auth/register/verify`, `/auth/login/verify`, `/auth/otp/resend`) and verify they return `410`.
-4. Confirm `/auth/me` returns `is_email_verified: true` after both register and login flows.
+2. Login with email/password and verify single-step sign-in works.
+3. Confirm `/auth/me` returns `is_email_verified: true` after both register and login flows.
 
 ## Core UI Flow
 1. Open the app and confirm owner defaults to saved value or `honey`.

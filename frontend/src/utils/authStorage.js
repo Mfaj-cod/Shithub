@@ -7,7 +7,19 @@ function normalizeToken(rawToken) {
     return null;
   }
 
-  const token = rawToken.trim();
+  let token = rawToken.trim();
+
+  if (token.toLowerCase().startsWith("bearer ")) {
+    token = token.slice(7).trim();
+  }
+
+  if (
+    (token.startsWith("\"") && token.endsWith("\"")) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    token = token.slice(1, -1).trim();
+  }
+
   if (!token || token === "undefined" || token === "null") {
     return null;
   }

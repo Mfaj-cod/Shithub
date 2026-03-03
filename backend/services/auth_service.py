@@ -1,11 +1,6 @@
-import hashlib
-import hmac
 import logging
-import secrets
-import smtplib
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +15,6 @@ from passlib.context import CryptContext  # type: ignore
 
 from backend.core.settings import settings
 from backend.infra.database import SessionLocal
-from backend.models.auth_otp import AuthOTPChallenge
 from backend.models.user_profile import UserProfile
 from backend.models.user import User
 
@@ -35,8 +29,6 @@ class AuthServiceError(Exception):
 
 
 class AuthService:
-    OTP_PURPOSE_REGISTER = "register"
-    OTP_PURPOSE_LOGIN = "login"
     AVATAR_MIME_EXTENSION = {
         "image/jpeg": "jpg",
         "image/png": "png",
@@ -57,19 +49,6 @@ class AuthService:
     @staticmethod
     def _normalize_username(username: str) -> str:
         return username.strip()
-
-    @staticmethod
-    def _hash_otp(raw_otp: str) -> str:
-        data = f"{raw_otp}:{settings.JWT_SECRET_KEY}".encode("utf-8")
-        return hashlib.sha256(data).hexdigest()
-
-    @staticmethod
-    def _otp_payload(challenge: AuthOTPChallenge) -> dict[str, Any]:
-        return {
-            "challenge_id": challenge.id,
-            "expires_at": challenge.expires_at,
-            "resend_available_at": challenge.resend_available_at,
-        }
 
     @staticmethod
     def _avatar_storage_path(file_name: str) -> str:
@@ -142,10 +121,6 @@ class AuthService:
 
         return self.password_context.verify(password, password_hash)
 
-    @staticmethod
-    def _generate_otp() -> str:
-        return f"{secrets.randbelow(1_000_000):06d}"
-
     def create_access_token(self, user: User) -> str:
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
         payload = {
@@ -212,30 +187,6 @@ class AuthService:
         finally:
             db.close()
 
-    def verify_registration(self, challenge_id: str, otp: str) -> dict[str, Any]:
-        db = SessionLocal()
-        try:
-            challenge = self._validate_challenge(db, challenge_id, otp, self.OTP_PURPOSE_REGISTER)
-
-            user = db.query(User).filter(User.id == challenge.user_id).first()
-            if not user:
-                raise AuthServiceError(status_code=404, detail="User not found")
-
-            user.is_email_verified = True
-            user.updated_at = self._utcnow()
-            challenge.is_consumed = True
-            db.commit()
-
-            access_token = self.create_access_token(user)
-            profile = self._get_profile(db, user.id)
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user": self.build_user_payload(user, profile),
-            }
-        finally:
-            db.close()
-
     def start_login(self, email: str, password: str) -> dict[str, Any]:
         email = self._normalize_email(email)
         if not email:
@@ -260,29 +211,6 @@ class AuthService:
             user.updated_at = now
             db.commit()
             return self._build_auth_payload(db, user)
-        finally:
-            db.close()
-
-    def verify_login(self, challenge_id: str, otp: str) -> dict[str, Any]:
-        db = SessionLocal()
-        try:
-            challenge = self._validate_challenge(db, challenge_id, otp, self.OTP_PURPOSE_LOGIN)
-            user = db.query(User).filter(User.id == challenge.user_id).first()
-            if not user:
-                raise AuthServiceError(status_code=404, detail="User not found")
-
-            challenge.is_consumed = True
-            user.last_login_at = self._utcnow()
-            user.updated_at = self._utcnow()
-            db.commit()
-
-            access_token = self.create_access_token(user)
-            profile = self._get_profile(db, user.id)
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user": self.build_user_payload(user, profile),
-            }
         finally:
             db.close()
 
@@ -352,134 +280,6 @@ class AuthService:
             return {"user": self.build_user_payload(current_user, profile)}
         finally:
             db.close()
-
-    def resend_otp(self, challenge_id: str) -> dict[str, Any]:
-        db = SessionLocal()
-        try:
-            challenge = db.query(AuthOTPChallenge).filter(AuthOTPChallenge.id == challenge_id).first()
-            if not challenge:
-                raise AuthServiceError(status_code=404, detail="OTP challenge not found")
-            if challenge.is_consumed:
-                raise AuthServiceError(status_code=400, detail="OTP challenge already used")
-
-            now = self._utcnow()
-            if challenge.expires_at < now:
-                raise AuthServiceError(status_code=400, detail="OTP challenge expired")
-            if now < challenge.resend_available_at:
-                raise AuthServiceError(status_code=429, detail="Please wait before requesting a new OTP")
-
-            raw_otp = self._generate_otp()
-            challenge.code_hash = self._hash_otp(raw_otp)
-            challenge.attempt_count = 0
-            challenge.expires_at = now + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
-            challenge.resend_available_at = now + timedelta(seconds=settings.OTP_RESEND_COOLDOWN_SECONDS)
-            db.commit()
-
-            self._send_otp_email(email=challenge.email, purpose=challenge.purpose, otp_code=raw_otp)
-            return self._otp_payload(challenge)
-        finally:
-            db.close()
-
-    def _create_challenge(
-        self,
-        db,
-        user_id: str | None,
-        email: str,
-        purpose: str,
-    ) -> tuple[AuthOTPChallenge, str]:
-        now = self._utcnow()
-        db.query(AuthOTPChallenge).filter(
-            AuthOTPChallenge.email == email,
-            AuthOTPChallenge.purpose == purpose,
-            AuthOTPChallenge.is_consumed.is_(False),
-        ).update({"is_consumed": True}, synchronize_session=False)
-
-        raw_otp = self._generate_otp()
-        challenge = AuthOTPChallenge(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            email=email,
-            purpose=purpose,
-            code_hash=self._hash_otp(raw_otp),
-            expires_at=now + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
-            resend_available_at=now + timedelta(seconds=settings.OTP_RESEND_COOLDOWN_SECONDS),
-            attempt_count=0,
-            max_attempts=settings.OTP_MAX_ATTEMPTS,
-            is_consumed=False,
-            created_at=now,
-        )
-        db.add(challenge)
-        return challenge, raw_otp
-
-    def _validate_challenge(self, db, challenge_id: str, otp: str, expected_purpose: str) -> AuthOTPChallenge:
-        challenge = db.query(AuthOTPChallenge).filter(AuthOTPChallenge.id == challenge_id).first()
-        if not challenge:
-            raise AuthServiceError(status_code=404, detail="OTP challenge not found")
-
-        if challenge.purpose != expected_purpose:
-            raise AuthServiceError(status_code=400, detail="OTP challenge purpose mismatch")
-
-        if challenge.is_consumed:
-            raise AuthServiceError(status_code=400, detail="OTP challenge already used")
-
-        now = self._utcnow()
-        if challenge.expires_at < now:
-            raise AuthServiceError(status_code=400, detail="OTP expired")
-
-        if challenge.attempt_count >= challenge.max_attempts:
-            raise AuthServiceError(status_code=400, detail="OTP attempts exceeded")
-
-        supplied_hash = self._hash_otp(otp.strip())
-        if not hmac.compare_digest(challenge.code_hash, supplied_hash):
-            challenge.attempt_count += 1
-            db.commit()
-            if challenge.attempt_count >= challenge.max_attempts:
-                raise AuthServiceError(status_code=400, detail="OTP attempts exceeded")
-            raise AuthServiceError(status_code=400, detail="Invalid OTP")
-
-        return challenge
-
-    def _send_otp_email(self, email: str, purpose: str, otp_code: str):
-        subject = "Sh*thub verification code"
-        action = "login" if purpose == self.OTP_PURPOSE_LOGIN else "registration"
-        body = (
-            f"Welcome to Sh*thub!\n\n"
-            f"Sh*thub is a collaborative platform that helps developers streamline their workflow, manage projects efficiently. Build with sh*tAI, fix bugs with bugAI and automate everything from building your sh*t to shipping your sh*t.\n\n"
-            f"Use the following OTP code to complete your {action}:\n\n"
-            f"Your Sh*thub {action} OTP is: {otp_code}\n"
-            f"It expires in {settings.OTP_EXPIRE_MINUTES} minutes."
-        )
-
-        smtp_configured = bool(settings.SMTP_HOST and settings.SMTP_FROM_EMAIL)
-        if not smtp_configured:
-            self._handle_dev_fallback(email, otp_code)
-            return
-
-        message = EmailMessage()
-        message["Subject"] = subject
-        message["From"] = settings.SMTP_FROM_EMAIL
-        message["To"] = email
-        message.set_content(body)
-
-        try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
-                if settings.SMTP_USE_TLS:
-                    smtp.starttls()
-                if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-                    smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                smtp.send_message(message)
-        except Exception as exc:
-            if settings.AUTH_DEV_OTP_LOG:
-                logger.warning("SMTP failed, using dev OTP log fallback: %s", exc)
-                self._handle_dev_fallback(email, otp_code)
-                return
-            raise AuthServiceError(status_code=500, detail="Unable to send OTP email") from exc
-
-    def _handle_dev_fallback(self, email: str, otp_code: str):
-        if settings.AUTH_DEV_OTP_LOG:
-            logger.warning("DEV OTP for %s: %s", email, otp_code)
-            return
-        raise AuthServiceError(status_code=500, detail="SMTP is not configured")
 
 
 auth_service = AuthService()

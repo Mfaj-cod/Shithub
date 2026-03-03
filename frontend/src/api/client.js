@@ -153,31 +153,10 @@ export function registerStart(username, email, password) {
   });
 }
 
-export function registerVerify(challengeId, otp) {
-  return request("/auth/register/verify", {
-    method: "POST",
-    body: JSON.stringify({ challenge_id: challengeId, otp })
-  });
-}
-
 export function loginStart(email, password) {
   return request("/auth/login/start", {
     method: "POST",
     body: JSON.stringify({ email, password })
-  });
-}
-
-export function loginVerify(challengeId, otp) {
-  return request("/auth/login/verify", {
-    method: "POST",
-    body: JSON.stringify({ challenge_id: challengeId, otp })
-  });
-}
-
-export function resendOtp(challengeId) {
-  return request("/auth/otp/resend", {
-    method: "POST",
-    body: JSON.stringify({ challenge_id: challengeId })
   });
 }
 
