@@ -1,4 +1,5 @@
 fastapi
+gunicorn
 pydantic
 pydantic-settings
 sqlalchemy
@@ -13,3 +14,4 @@ PyJWT
 email-validator
 bcrypt>=4.3.0
 python-multipart
+uvicorn

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     BASE_URL: str = "http://127.0.0.1:8000"
     REPO_ROOT: str = "./repos"
     DATABASE_URL: str = "sqlite:///./shithub.db"
+    REDIS_URL: str = "redis://localhost:6379/0"
     GROQ_API_KEY: str | None = None
     BUG_API_KEY: str | None = None
     BUGAI_MODEL: str = "llama-3.3-70b-versatile"

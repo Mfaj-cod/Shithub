@@ -11,11 +11,25 @@ const IST_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   hour12: false,
 });
 
+function parseBackendDate(dateValue) {
+  if (dateValue instanceof Date) {
+    return dateValue;
+  }
+
+  if (typeof dateValue === "string") {
+    const normalized = dateValue.trim().replace(" ", "T");
+    const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(normalized);
+    return new Date(hasTimezone ? normalized : `${normalized}Z`);
+  }
+
+  return new Date(dateValue);
+}
+
 function formatDate(dateValue) {
   if (!dateValue) {
     return "n/a";
   }
-  const date = new Date(dateValue);
+  const date = parseBackendDate(dateValue);
   if (Number.isNaN(date.getTime())) {
     return dateValue;
   }

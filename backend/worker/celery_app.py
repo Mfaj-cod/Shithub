@@ -1,9 +1,10 @@
 from celery import Celery # type: ignore
+from backend.core.settings import settings
 
 celery = Celery(
     "shithub",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/0",
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
     include=["backend.worker.tasks"],
 )
 

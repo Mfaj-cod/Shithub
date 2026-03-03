@@ -1,0 +1,61 @@
+services:
+  - type: redis
+    name: shithub-redis
+    plan: free
+
+  - type: web
+    name: shithub-api
+    env: docker
+    dockerfilePath: ./Dockerfile.backend
+    autoDeploy: true
+    plan: free
+    healthCheckPath: /docs
+
+    disk:
+      name: shithub-data
+      mountPath: /data
+      sizeGB: 5
+
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: shithub-redis
+          property: connectionString
+          
+      - key: BASE_URL
+        value: https://shithub-api.onrender.com
+      - key: DATABASE_URL
+        value: sqlite:////data/shithub.db
+      - key: REPO_ROOT
+        value: /data/repos
+      - key: MEDIA_ROOT
+        value: /data/media
+      - key: FRONTEND_ORIGINS
+        value: https://shithub-frontend.onrender.com
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: BUG_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+
+  - type: web
+    name: shithub-frontend
+    env: docker
+    dockerfilePath: ./Dockerfile.frontend
+    autoDeploy: true
+    plan: free
+    envVars:
+      - key: BACKEND_ORIGIN
+        value: https://shithub-api.onrender.com
