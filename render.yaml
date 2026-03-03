@@ -22,7 +22,7 @@ services:
           type: redis
           name: shithub-redis
           property: connectionString
-          
+
       - key: BASE_URL
         value: https://shithub-api.onrender.com
       - key: DATABASE_URL
@@ -59,3 +59,15 @@ services:
     envVars:
       - key: BACKEND_ORIGIN
         value: https://shithub-api.onrender.com
+        
+  - type: worker
+    name: shithub-worker
+    env: docker
+    dockerfilePath: ./Dockerfile.backend
+    startCommand: celery -A backend.worker.celery_app.celery worker --pool=solo --loglevel=info
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: shithub-redis
+          property: connectionString
