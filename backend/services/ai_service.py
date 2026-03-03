@@ -319,8 +319,8 @@ Input text:
             return text
 
         # Remove markdown code fences while preserving code content.
-        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*$", "", text, flags=re.MULTILINE)
-        text = re.sub(r"^```\s*$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*`{3,}.*$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*`+\s*$", "", text, flags=re.MULTILINE)
 
         # Remove heading markers and bold markers.
         text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)

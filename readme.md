@@ -25,7 +25,7 @@ Frontend / CLI -> FastAPI API -> SQLite + bare Git repos + Celery/Redis -> Groq 
 ## Environment Variables
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GROQ_API_KEY` | _none_ | Required for AI README generation |
+| `GROQ_API_KEY` | _none_ | Required for AI generation |
 | `BASE_URL` | `http://127.0.0.1:8000` | Base URL used by backend services |
 | `REPO_ROOT` | `./repos` | Filesystem location for bare repositories |
 | `DATABASE_URL` | `sqlite:///./shithub.db` | SQLAlchemy database connection |
