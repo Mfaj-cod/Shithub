@@ -57,9 +57,9 @@ services:
     autoDeploy: true
     plan: free
     envVars:
-      - key: BACKEND_ORIGIN
+      - key: BACKEND_ORIGIN 
         value: https://shithub-api.onrender.com
-        
+
   - type: worker
     name: shithub-worker
     env: docker
