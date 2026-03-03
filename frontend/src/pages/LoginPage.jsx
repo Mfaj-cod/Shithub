@@ -41,8 +41,14 @@ function LoginPage() {
 
     try {
       const data = await loginStart(email.trim(), password);
+      const token = typeof data?.access_token === "string" ? data.access_token.trim() : "";
+      const username = typeof data?.user?.username === "string" ? data.user.username.trim() : "";
+      if (!token || !username) {
+        throw new Error("Login failed due to an invalid auth response. Please sign in again.");
+      }
+
       clearAuthSession();
-      setAuthToken(data.access_token);
+      setAuthToken(token);
       setAuthUser(data.user);
       setStoredOwner(data.user.username);
       redirectAfterAuth();

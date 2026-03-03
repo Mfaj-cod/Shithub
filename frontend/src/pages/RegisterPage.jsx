@@ -58,8 +58,14 @@ function RegisterPage() {
 
     try {
       const data = await registerStart(username.trim(), email.trim(), password);
+      const token = typeof data?.access_token === "string" ? data.access_token.trim() : "";
+      const createdUsername = typeof data?.user?.username === "string" ? data.user.username.trim() : "";
+      if (!token || !createdUsername) {
+        throw new Error("Registration failed due to an invalid auth response. Please sign in again.");
+      }
+
       clearAuthSession();
-      setAuthToken(data.access_token);
+      setAuthToken(token);
       setAuthUser(data.user);
 
       let nextUser = data.user;

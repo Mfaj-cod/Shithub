@@ -109,13 +109,14 @@ function HomePage() {
 
   const ensureMutationAccess = () => {
     const token = getAuthToken();
-    if (!token) {
+    const authUser = getAuthUser();
+    if (!token || !authUser?.username) {
+      clearAuthSession();
       navigate(loginRedirectPath);
       return false;
     }
 
-    const authUser = getAuthUser();
-    if (authUser?.username && authUser.username !== decodedOwner) {
+    if (authUser.username !== decodedOwner) {
       setError(getNamespaceErrorMessage());
       return false;
     }
