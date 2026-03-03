@@ -1,51 +1,28 @@
 # Shithub
 
-Shithub is a self-hosted Git service built with a FastAPI backend, a React frontend, and a CLI.
-It lets you manage repositories, serve Git over Smart HTTP, and run AI README generation as async jobs.
-The web UI focuses on day-to-day repo operations and job visibility.
+Shithub is a GitHub-style self-hosted Git platform with a FastAPI backend, React frontend, Celery workers, and a CLI.  
+It supports repository hosting over Smart HTTP, async AI automations (README + code build), and OTP-based authentication.
 
 ## Features
-- Create, list, and delete repositories
-- Git Smart HTTP clone/push support through `/repos/*`
-- AI README generation with queued jobs, status tracking, and logs
-- Email OTP authentication (register/login) with JWT bearer tokens
-- Web UI and CLI support for repository workflows
+- Repository create/list/delete
+- Git Smart HTTP clone/push via `/repos/*`
+- Email OTP registration/login with JWT session auth
+- Optional profile picture upload and avatar display
+- AI README generation jobs with status and logs
+- sh*tAI build jobs from natural-language prompts
+- bugAI coding assistant page for Q&A with optional repo context
+- Web UI + CLI workflows
 
 ## Architecture
 ```text
-Frontend / CLI -> FastAPI API -> SQLite + bare Git repos + Celery/Redis -> Groq AI
+Frontend / CLI -> FastAPI -> SQLite + bare repos + Celery/Redis -> LLM providers
 ```
 
 ## Prerequisites
 - Python 3.11+
 - Node.js 18+
 - Git
-- Redis (required for async AI jobs)
-
-## Environment Variables
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `GROQ_API_KEY` | _none_ | Required for AI generation |
-| `BASE_URL` | `http://127.0.0.1:8000` | Base URL used by backend services |
-| `REPO_ROOT` | `./repos` | Filesystem location for bare repositories |
-| `DATABASE_URL` | `sqlite:///./shithub.db` | SQLAlchemy database connection |
-| `FRONTEND_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | CORS allowlist for frontend origins |
-| `JWT_SECRET_KEY` | `this_jwt_secret_key_should_be_changed_in_production` | Secret used to sign JWT access tokens |
-| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
-| `JWT_EXPIRE_MINUTES` | `60` | Access token expiry in minutes |
-| `OTP_EXPIRE_MINUTES` | `10` | OTP challenge expiry window |
-| `OTP_RESEND_COOLDOWN_SECONDS` | `60` | Minimum delay before OTP resend |
-| `OTP_MAX_ATTEMPTS` | `5` | Max invalid OTP attempts per challenge |
-| `SMTP_HOST` | _none_ | SMTP host for OTP email delivery |
-| `SMTP_PORT` | `587` | SMTP port |
-| `SMTP_USERNAME` | _none_ | SMTP username |
-| `SMTP_PASSWORD` | _none_ | SMTP password |
-| `SMTP_FROM_EMAIL` | _none_ | Sender email for OTP messages |
-| `SMTP_USE_TLS` | `true` | Enable STARTTLS for SMTP |
-| `AUTH_DEV_OTP_LOG` | `true` | Log OTP in backend logs if SMTP is unavailable |
-| `VITE_API_BASE_URL` | `http://127.0.0.1:8000` | Frontend API base URL |
-
-Create `.env` in project root for backend values and `frontend/.env` for frontend values (or export env vars in your shell).
+- Redis (for background jobs)
 
 ## Run Locally (Full Stack)
 
@@ -66,7 +43,7 @@ uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 redis-server
 ```
 
-### 3. Celery Worker
+### 3. Celery worker
 ```bash
 celery -A backend.worker.celery_app.celery worker --loglevel=info
 ```
@@ -78,36 +55,34 @@ npm install
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173` by default.
+Default local URLs:
+- Frontend: `http://localhost:5173`
+- Backend: `http://127.0.0.1:8000`
 
-If SMTP is not configured and `AUTH_DEV_OTP_LOG=true`, OTP codes are written to backend logs for development.
+## Authentication
+1. Register: `POST /auth/register/start` then `POST /auth/register/verify`
+2. Login: `POST /auth/login/start` then `POST /auth/login/verify`
+3. Optional avatar: `POST /auth/me/avatar` (upload), `DELETE /auth/me/avatar` (remove)
+4. Session info: `GET /auth/me`
 
-## Authentication Flow (Email OTP)
-1. Register:
-   - `POST /auth/register/start` with `username`, `email`, `password`
-   - `POST /auth/register/verify` with `challenge_id`, `otp`
-2. Login:
-   - `POST /auth/login/start` with `email`, `password`
-   - `POST /auth/login/verify` with `challenge_id`, `otp`
-3. Token usage:
-   - Store `access_token` and send `Authorization: Bearer <token>` for mutation endpoints.
-4. OTP maintenance:
-   - `POST /auth/otp/resend` to resend active OTP challenge.
+Mutation endpoints are owner-protected: authenticated users can only mutate repositories in their own namespace.
 
-## Frontend Usage
-1. Open the app and set the owner (the value is persisted in local storage).
-2. Create or delete repositories from the home page.
-3. Trigger `Generate README` for a repository.
-4. Open `/repo/:owner/:name` to view dashboard metrics and recent jobs.
-5. Use `View logs` in jobs table to inspect worker output for each job.
+## Web Usage
+1. Sign in and open `/` for the logged-in dashboard.
+2. Use repository pages under `/u/:owner/repositories`.
+3. Queue AI jobs from:
+   - `Generate README`
+   - `Build with sh*tAI`
+4. Track jobs/logs in `/repo/:owner/:name/actions`.
+5. Use `/bugai` for coding Q&A with optional repository context.
 
 ## CLI Usage
-Install the CLI in editable mode:
+Install CLI:
 ```bash
 pip install -e .
 ```
 
-Example commands:
+Common commands:
 ```bash
 shithub create <owner> <name>
 shithub list <owner>
@@ -118,53 +93,50 @@ shithub job <job_id>
 ## API Reference (Canonical)
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/auth/register/start` | Start registration and send OTP |
-| `POST` | `/auth/register/verify` | Verify registration OTP and return JWT |
-| `POST` | `/auth/login/start` | Start login and send OTP |
-| `POST` | `/auth/login/verify` | Verify login OTP and return JWT |
-| `POST` | `/auth/otp/resend` | Resend OTP for active challenge |
-| `GET` | `/auth/me` | Return current authenticated user |
-| `POST` | `/repos/{owner}/{name}` | Create repository |
-| `DELETE` | `/repos/{owner}/{name}` | Delete repository |
-| `GET` | `/repos/{owner}` | List repositories for owner |
-| `POST` | `/repos/{owner}/{name}/ai/readme` | Queue AI README generation |
-| `GET` | `/repos/{owner}/{name}/dashboard` | Repository dashboard data |
-| `GET` | `/repos/{owner}/{name}/jobs` | List jobs for repository |
-| `GET` | `/jobs/{job_id}` | Job status and result |
+| `POST` | `/auth/register/start` | Start register OTP |
+| `POST` | `/auth/register/verify` | Verify register OTP |
+| `POST` | `/auth/login/start` | Start login OTP |
+| `POST` | `/auth/login/verify` | Verify login OTP |
+| `POST` | `/auth/otp/resend` | Resend OTP |
+| `GET` | `/auth/me` | Current user payload |
+| `POST` | `/auth/me/avatar` | Upload avatar |
+| `DELETE` | `/auth/me/avatar` | Remove avatar |
+| `POST` | `/repos/{owner}/{name}` | Create repo |
+| `DELETE` | `/repos/{owner}/{name}` | Delete repo |
+| `GET` | `/repos/{owner}` | List repos |
+| `GET` | `/repos/{owner}/{name}/dashboard` | Repo dashboard |
+| `GET` | `/repos/{owner}/{name}/tree` | Repo tree at optional path |
+| `GET` | `/repos/{owner}/{name}/blob` | File blob content |
+| `POST` | `/repos/{owner}/{name}/ai/readme` | Queue README job |
+| `POST` | `/repos/{owner}/{name}/ai/build` | Queue sh*tAI build job |
+| `GET` | `/repos/{owner}/{name}/jobs` | Repository jobs |
+| `GET` | `/jobs/{job_id}` | Job status |
 | `GET` | `/jobs/{job_id}/logs` | Job logs |
-
-Mutation endpoints (`POST/DELETE /repos/...`) require bearer authentication and only allow changes within the authenticated user's owner namespace.
+| `POST` | `/ai/bugai/ask` | bugAI coding Q&A |
 
 ## Backward Compatibility (Deprecated Aliases)
-The following routes are kept only for compatibility with older clients.  
-Use canonical endpoints for all new integrations.
-
 - `GET /repos/repos/{owner}/{name}/dashboard`
 - `GET /jobs/repos/{owner}/{name}/jobs`
 - `GET /jobs/jobs/{job_id}/logs`
 
+Use canonical routes for new integrations.
+
 ## Verification Checklist
-- Create a repository in the UI and confirm it appears immediately.
-- Trigger AI README generation and observe `queued -> running -> success/failed`.
-- Open job logs in the modal and verify logs load correctly.
-- Confirm dashboard metrics render for the selected repository.
-- Confirm clone works via Smart HTTP:
-  - `git clone http://127.0.0.1:8000/repos/<owner>/<repo>.git`
+- Register and login with OTP.
+- Upload/change/remove profile picture; verify navbar + profile avatar updates.
+- Create repo, list repo, delete repo.
+- Clone repo using Smart HTTP.
+- Run `Generate README` and inspect logs.
+- Run `Build with sh*tAI` and inspect logs.
+- Open `/bugai` and ask coding questions with and without repo context.
 
 ## Troubleshooting
-- CORS errors from frontend:
-  - Ensure `FRONTEND_ORIGINS` includes your frontend origin (for example `http://localhost:5173`).
-- Jobs stuck in `queued`:
-  - Ensure Redis is running and Celery worker is running.
-- AI README jobs failing:
-  - Ensure `GROQ_API_KEY` is set and valid.
-- OTP not delivered:
-  - Configure SMTP variables or keep `AUTH_DEV_OTP_LOG=true` and read OTP from backend logs.
-- `401` or `403` on repo create/delete/AI README:
-  - Sign in first and use your own owner namespace (`/u/<username>/...`).
-- Git clone/push issues over HTTP:
-  - Ensure Git is installed and backend API is running on the expected host/port.
+- Jobs stuck in `queued`: ensure Redis + Celery worker are running.
+- OTP not received: check SMTP configuration, or use development OTP logs.
+- `401`/`403` on mutations: sign in and use your own owner namespace.
+- Git clone/push errors: verify backend is running and Git is installed.
+- Avatar upload fails: use supported image type and smaller file size.
 
 ## Security Notes
-- Do not commit real API keys to source control.
-- Keep `.env` files local and out of public repositories.
+- Do not commit secrets or private credentials.
+- Keep local config files private.
