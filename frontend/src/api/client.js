@@ -1,5 +1,10 @@
 import { clearAuthSession, getAuthToken } from "../utils/authStorage";
 
+const envApiBase =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_BACKEND_ORIGIN ||
+  "";
+
 export const DEFAULT_API_BASE_URL = import.meta.env.DEV ? "http://127.0.0.1:8000" : "/api";
 export const AUTH_INVALID_EVENT = "shithub:auth-invalid";
 
@@ -8,7 +13,7 @@ export function resolveApiBaseUrl(envValue) {
   return value || DEFAULT_API_BASE_URL;
 }
 
-export const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+export const API_BASE_URL = resolveApiBaseUrl(envApiBase);
 
 async function request(path, options = {}) {
   const { skipAuthInvalidEvent = false, ...fetchOptions } = options;

@@ -57,3 +57,5 @@ services:
     envVars:
       - key: BACKEND_ORIGIN
         value: https://shithub-api.onrender.com
+      - key: VITE_BACKEND_ORIGIN
+        value: https://shithub-api.onrender.com
