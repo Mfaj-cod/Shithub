@@ -1,4 +1,5 @@
 import os
+import json
 from pydantic_settings import BaseSettings # type: ignore
 from dotenv import load_dotenv
 from pydantic import field_validator   # type: ignore
@@ -27,7 +28,16 @@ class Settings(BaseSettings):
     @classmethod
     def parse_csv_lists(cls, value):
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            trimmed = value.strip()
+            if trimmed.startswith("[") and trimmed.endswith("]"):
+                try:
+                    parsed = json.loads(trimmed)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except json.JSONDecodeError:
+                    pass
+
+            return [item.strip().strip("'\"") for item in trimmed.split(",") if item.strip()]
         return value
 
 

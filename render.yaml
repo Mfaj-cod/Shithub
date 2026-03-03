@@ -30,7 +30,7 @@ services:
       - key: MEDIA_ROOT
         value: /tmp/media
       - key: FRONTEND_ORIGINS
-        value: '["https://shithub-frontend.onrender.com"]'
+        value: https://shithub-frontend.onrender.com
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: GROQ_API_KEY
