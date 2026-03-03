@@ -1,6 +1,7 @@
 import os
 import json
-from pydantic_settings import BaseSettings # type: ignore
+from typing import Annotated
+from pydantic_settings import BaseSettings, NoDecode # type: ignore
 from dotenv import load_dotenv
 from pydantic import field_validator   # type: ignore
 load_dotenv()
@@ -15,14 +16,14 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     BUG_API_KEY: str | None = None
     BUGAI_MODEL: str = "llama-3.3-70b-versatile"
-    FRONTEND_ORIGINS: list[str] = ["https://shithub-frontend.onrender.com", "https://shithub-frontend.onrender.com"]
+    FRONTEND_ORIGINS: Annotated[list[str], NoDecode] = ["https://shithub-frontend.onrender.com", "https://shithub-frontend.onrender.com"]
     JWT_SECRET_KEY: str = "5d6yv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv5t6d75tb67rv"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
     MEDIA_ROOT: str = "./media"
     AVATAR_SUBDIR: str = "avatars"
     AVATAR_MAX_BYTES: int = 2_097_152
-    AVATAR_ALLOWED_MIME: list[str] = ["image/jpeg", "image/png", "image/webp"]
+    AVATAR_ALLOWED_MIME: Annotated[list[str], NoDecode] = ["image/jpeg", "image/png", "image/webp"]
 
     @field_validator("FRONTEND_ORIGINS", "AVATAR_ALLOWED_MIME", mode="before")
     @classmethod
