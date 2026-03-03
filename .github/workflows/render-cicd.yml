@@ -1,13 +1,12 @@
 name: Shithub CI/CD
 
 on:
-  pull_request:
   push:
     branches:
       - main
 
 jobs:
-  test:
+  continuous-integration:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,9 +37,9 @@ jobs:
       - name: Frontend tests
         run: npm run test --prefix frontend
 
-  deploy:
+  continuous-deployment:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
+    needs: continuous-integration
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render API deploy hook
