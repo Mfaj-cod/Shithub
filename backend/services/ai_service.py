@@ -11,9 +11,9 @@ from backend.infra.database import SessionLocal
 from backend.models.repo import Repo
 
 
-MAX_FILES = 120          # token safety
+MAX_FILES = 500          # token safety
 MODEL = "llama-3.1-8b-instant"
-MAX_CODE_CONTEXT_FILES = 40
+MAX_CODE_CONTEXT_FILES = 400
 MAX_CODE_CONTEXT_BYTES = 5000
 MAX_GENERATED_FILES = 30
 MAX_JSON_ATTEMPTS = 3
