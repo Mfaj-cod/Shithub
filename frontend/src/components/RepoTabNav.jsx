@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 
 const REPO_TABS = [
   { id: "code", label: "Code" },
+  { id: "editor", label: "Editor" },
   { id: "issues", label: "Issues" },
   { id: "pulls", label: "Pull requests" },
   { id: "actions", label: "Actions" },

@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { API_BASE_URL, getJobLogs, getRepoBlob, getRepoDashboard, getRepoTree, listRepoJobs, triggerAiBuild, triggerAiReadme } from "../api/client";
+import MonacoEditor, { loader as monacoLoader } from "@monaco-editor/react";
+import {
+  API_BASE_URL,
+  askBugAi,
+  getJobLogs,
+  getRepoBlob,
+  getRepoDashboard,
+  getRepoTree,
+  listRepoJobs,
+  saveRepoBlob,
+  triggerAiBuild,
+  triggerAiReadme
+} from "../api/client";
 import BuildWithAiDialog from "../components/BuildWithAiDialog";
 import EmptyStatePanel from "../components/EmptyStatePanel";
 import JobLogsModal from "../components/JobLogsModal";
@@ -11,6 +23,12 @@ import ShithubIcon from "../components/ShithubIcon";
 import StatusPill from "../components/StatusPill";
 import { hasActiveJobs, useJobPolling } from "../hooks/useJobPolling";
 import { clearAuthSession, getAuthToken, getAuthUser } from "../utils/authStorage";
+
+monacoLoader.config({
+  paths: {
+    vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs"
+  }
+});
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -25,6 +43,40 @@ function formatBytes(bytes) {
     index += 1;
   }
   return `${value.toFixed(value < 10 && index > 0 ? 1 : 0)} ${units[index]}`;
+}
+
+const EXTENSION_LANGUAGE_MAP = {
+  js: "javascript",
+  jsx: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  json: "json",
+  py: "python",
+  md: "markdown",
+  html: "html",
+  css: "css",
+  scss: "scss",
+  yml: "yaml",
+  yaml: "yaml",
+  sh: "shell",
+  bash: "shell",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  hpp: "cpp",
+  txt: "plaintext"
+};
+
+function getLanguageForPath(path) {
+  const parts = (path || "").split(".");
+  if (parts.length < 2) {
+    return "plaintext";
+  }
+  const ext = parts.pop().toLowerCase();
+  return EXTENSION_LANGUAGE_MAP[ext] || "plaintext";
 }
 
 function RepoPage() {
@@ -58,8 +110,21 @@ function RepoPage() {
   const [buildDialogOpen, setBuildDialogOpen] = useState(false);
   const [buildSubmitting, setBuildSubmitting] = useState(false);
   const [buildError, setBuildError] = useState("");
+  const editorRef = useRef(null);
+  const [editorFiles, setEditorFiles] = useState({});
+  const [editorOrder, setEditorOrder] = useState([]);
+  const [activeEditorPath, setActiveEditorPath] = useState("");
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorError, setEditorError] = useState("");
+  const [editorInfo, setEditorInfo] = useState("");
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiResponse, setAiResponse] = useState("");
 
   const repoLabel = useMemo(() => `${decodedOwner}/${decodedName}`, [decodedOwner, decodedName]);
+  const activeEditorFile = useMemo(() => (activeEditorPath ? editorFiles[activeEditorPath] : null), [activeEditorPath, editorFiles]);
   const cloneUrl = useMemo(
     () => `${API_BASE_URL}/repos/${encodeURIComponent(decodedOwner)}/${encodeURIComponent(decodedName)}.git`,
     [decodedOwner, decodedName]
@@ -406,7 +471,7 @@ function RepoPage() {
     setSearchParams(nextParams, { replace: false });
   };
 
-  const openFilePath = (targetPath) => {
+  const syncUrlToFile = (targetPath) => {
     const normalized = (targetPath || "").trim();
     if (!normalized) {
       return;
@@ -426,6 +491,14 @@ function RepoPage() {
     setSearchParams(nextParams, { replace: false });
   };
 
+  const openFilePath = (targetPath) => {
+    const normalized = (targetPath || "").trim();
+    if (!normalized) {
+      return;
+    }
+    syncUrlToFile(normalized);
+  };
+
   const treeBreadcrumbs = useMemo(() => {
     const segments = treePath.split("/").filter(Boolean);
     const crumbs = [{ label: decodedName, path: "" }];
@@ -443,6 +516,238 @@ function RepoPage() {
     }
     return blobData.content.replace(/\r\n/g, "\n").split("\n");
   }, [blobData]);
+
+  const openEditorFile = useCallback(
+    async (targetPath) => {
+      const normalized = (targetPath || "").trim();
+      if (!normalized) {
+        return;
+      }
+
+      setEditorError("");
+      setEditorInfo("");
+
+      if (editorFiles[normalized]) {
+        setActiveEditorPath(normalized);
+        return;
+      }
+
+      setEditorLoading(true);
+      try {
+        const blob = await getRepoBlob(decodedOwner, decodedName, normalized);
+        const filePayload = {
+          path: normalized,
+          name: blob?.name || normalized.split("/").pop(),
+          language: getLanguageForPath(normalized),
+          content: blob?.content || "",
+          originalContent: blob?.content || "",
+          isDirty: false,
+          isBinary: Boolean(blob?.is_binary),
+          isTruncated: Boolean(blob?.truncated)
+        };
+
+        setEditorFiles((prev) => ({ ...prev, [normalized]: filePayload }));
+        setEditorOrder((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
+        setActiveEditorPath(normalized);
+      } catch (err) {
+        setEditorError(err.message);
+      } finally {
+        setEditorLoading(false);
+      }
+    },
+    [decodedName, decodedOwner, editorFiles]
+  );
+
+  const handleEditorFileOpen = async (targetPath) => {
+    syncUrlToFile(targetPath);
+    await openEditorFile(targetPath);
+  };
+
+  const handleEditorTabActivate = (path) => {
+    setActiveEditorPath(path);
+    syncUrlToFile(path);
+  };
+
+  const closeEditorFile = (path) => {
+    setEditorFiles((prev) => {
+      if (!prev[path]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+
+    setEditorOrder((prev) => {
+      const nextOrder = prev.filter((item) => item !== path);
+      if (activeEditorPath === path) {
+        const nextActive = nextOrder[0] || "";
+        setActiveEditorPath(nextActive);
+        if (nextActive) {
+          syncUrlToFile(nextActive);
+        } else {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.delete("file");
+          setSearchParams(nextParams, { replace: false });
+        }
+      }
+      return nextOrder;
+    });
+  };
+
+  const handleEditorChange = (value) => {
+    if (!activeEditorPath) {
+      return;
+    }
+    const nextValue = value ?? "";
+    setEditorFiles((prev) => {
+      const current = prev[activeEditorPath];
+      if (!current) {
+        return prev;
+      }
+      const isDirty = nextValue !== current.originalContent;
+      return {
+        ...prev,
+        [activeEditorPath]: {
+          ...current,
+          content: nextValue,
+          isDirty
+        }
+      };
+    });
+  };
+
+  const handleEditorSave = async () => {
+    if (!activeEditorFile) {
+      return;
+    }
+
+    if (activeEditorFile.isBinary || activeEditorFile.isTruncated) {
+      setEditorError("This file cannot be edited in the browser.");
+      return;
+    }
+
+    if (!ensureMutationAccess()) {
+      return;
+    }
+
+    setEditorError("");
+    setEditorInfo("");
+    setEditorSaving(true);
+
+    try {
+      const result = await saveRepoBlob(decodedOwner, decodedName, activeEditorFile.path, activeEditorFile.content);
+      if (result?.status === "no_changes") {
+        setEditorInfo("No changes to save.");
+      } else {
+        const commitLabel = result?.commit ? result.commit.slice(0, 7) : "saved";
+        setEditorInfo(`Saved ${activeEditorFile.path} (${commitLabel}).`);
+      }
+
+      setEditorFiles((prev) => {
+        const current = prev[activeEditorFile.path];
+        if (!current) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [activeEditorFile.path]: {
+            ...current,
+            originalContent: current.content,
+            isDirty: false
+          }
+        };
+      });
+    } catch (err) {
+      setEditorError(resolveMutationError(err));
+    } finally {
+      setEditorSaving(false);
+    }
+  };
+
+  const getSelectedEditorText = () => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return "";
+    }
+    const selection = editor.getSelection();
+    if (!selection || selection.isEmpty()) {
+      return "";
+    }
+    const model = editor.getModel();
+    if (!model) {
+      return "";
+    }
+    return model.getValueInRange(selection);
+  };
+
+  const handleAiRequest = async (mode) => {
+    if (!activeEditorFile) {
+      setAiError("Open a file to ask AI.");
+      setAiPanelOpen(true);
+      return;
+    }
+    if (!ensureMutationAccess()) {
+      return;
+    }
+
+    const selected = getSelectedEditorText();
+    if (!selected) {
+      setAiError("Select code in the editor first.");
+      setAiPanelOpen(true);
+      return;
+    }
+
+    setAiPanelOpen(true);
+    setAiLoading(true);
+    setAiError("");
+    setAiResponse("");
+
+    const header =
+      mode === "bugai"
+        ? "Debug and fix the selected code. Return only the corrected code."
+        : "Improve the selected code. Return only the updated code.";
+    const prompt = `${header}\nRepository: ${decodedOwner}/${decodedName}\nFile: ${activeEditorFile.path}\nSelected code:\n${selected}`;
+
+    try {
+      const result = await askBugAi({ prompt, history: [], owner: decodedOwner, repo: decodedName });
+      const answer = typeof result?.answer === "string" ? result.answer.trim() : "";
+      if (!answer) {
+        setAiError("AI returned an empty response.");
+      } else {
+        setAiResponse(answer);
+      }
+    } catch (err) {
+      setAiError(err?.message || "Failed to reach AI service.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleApplyAi = () => {
+    if (!aiResponse) {
+      setAiError("No AI response to apply.");
+      return;
+    }
+    const editor = editorRef.current;
+    if (!editor) {
+      setAiError("Editor is not ready.");
+      return;
+    }
+    const selection = editor.getSelection();
+    if (!selection || selection.isEmpty()) {
+      setAiError("Select code in the editor first.");
+      return;
+    }
+    editor.executeEdits("ai-apply", [{ range: selection, text: aiResponse }]);
+    editor.focus();
+  };
+
+  useEffect(() => {
+    if (tab === "editor" && filePath) {
+      openEditorFile(filePath);
+    }
+  }, [filePath, openEditorFile, tab]);
 
   const renderRepoTabBody = () => {
     if (loading) {
@@ -596,6 +901,215 @@ function RepoPage() {
       );
     }
 
+    if (tab === "editor") {
+      const entries = Array.isArray(treeData?.entries) ? treeData.entries : [];
+      const isReadOnly = Boolean(activeEditorFile?.isBinary || activeEditorFile?.isTruncated);
+
+      return (
+        <div className="space-y-4">
+          {editorError ? <p className="rounded-md border border-gh-danger/40 bg-gh-danger/10 p-3 text-sm text-gh-danger">{editorError}</p> : null}
+          {editorInfo ? <p className="rounded-md border border-gh-success/40 bg-gh-success/10 p-3 text-sm text-[#7ee787]">{editorInfo}</p> : null}
+
+          <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+            <aside className="space-y-3">
+              <div className="rounded-md border border-gh-border bg-gh-panel">
+                <div className="border-b border-gh-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gh-muted">Files</div>
+                <div className="border-b border-gh-border px-4 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gh-muted">
+                    {treeBreadcrumbs.map((crumb, index) => {
+                      const isLast = index === treeBreadcrumbs.length - 1;
+                      if (isLast) {
+                        return (
+                          <span key={crumb.path || "root"} className="font-semibold text-gh-text">
+                            {crumb.label}
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          key={crumb.path || "root"}
+                          type="button"
+                          onClick={() => goToTreePath(crumb.path)}
+                          className="text-gh-accent hover:underline"
+                        >
+                          {crumb.label}/
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {treeLoading ? (
+                  <div className="px-4 py-4 text-sm text-gh-muted">Loading repository files...</div>
+                ) : entries.length === 0 ? (
+                  <div className="px-4 py-4 text-sm text-gh-muted">No files in this directory.</div>
+                ) : (
+                  <ul className="divide-y divide-gh-border">
+                    {entries.map((entry) => (
+                      <li key={entry.path} className="flex items-center justify-between gap-2 px-4 py-3 hover:bg-gh-panelAlt/60">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            {entry.type === "dir" ? (
+                              <button type="button" onClick={() => goToTreePath(entry.path)} className="truncate text-left font-semibold text-gh-accent hover:underline">
+                                {entry.name}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleEditorFileOpen(entry.path)}
+                                className={`truncate text-left hover:underline ${
+                                  activeEditorPath === entry.path ? "font-semibold text-gh-accent" : "text-gh-text"
+                                }`}
+                              >
+                                {entry.name}
+                              </button>
+                            )}
+                            <span className="rounded-full border border-gh-border px-2 py-0.5 text-xs text-gh-muted">{entry.type}</span>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-gh-muted">{entry.path}</p>
+                        </div>
+
+                        <span className="whitespace-nowrap text-xs text-gh-muted">{entry.type === "file" ? formatBytes(entry.size_bytes ?? 0) : "--"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </aside>
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-gh-border bg-gh-panel p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleEditorSave}
+                    disabled={!activeEditorFile || !activeEditorFile.isDirty || isReadOnly || editorSaving}
+                    className="gh-btn-primary rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+                  >
+                    {editorSaving ? "Saving..." : "Save & Commit"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAiRequest("shitai")}
+                    disabled={!activeEditorFile}
+                    className="gh-btn rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+                  >
+                    Ask Sh*tAI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAiRequest("bugai")}
+                    disabled={!activeEditorFile}
+                    className="gh-btn rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+                  >
+                    Debug with BugAI
+                  </button>
+                </div>
+                <span className="text-xs text-gh-muted">{activeEditorFile?.path || "No file selected"}</span>
+              </div>
+
+              {isReadOnly ? (
+                <div className="rounded-md border border-gh-warning/40 bg-gh-warning/10 p-3 text-xs text-gh-warning">
+                  This file is binary or too large to edit in the browser.
+                </div>
+              ) : null}
+
+              <div className="space-y-4">
+                <div className="overflow-hidden rounded-md border border-gh-border bg-gh-panel">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-gh-border px-3 py-2">
+                    {editorOrder.length === 0 ? (
+                      <span className="text-xs text-gh-muted">No files open.</span>
+                    ) : (
+                      editorOrder.map((path) => {
+                        const file = editorFiles[path];
+                        if (!file) {
+                          return null;
+                        }
+                        const isActive = path === activeEditorPath;
+                        return (
+                          <div
+                            key={path}
+                            className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${
+                              isActive ? "border-gh-accent text-gh-text" : "border-transparent text-gh-muted hover:text-gh-text"
+                            }`}
+                          >
+                            <button type="button" onClick={() => handleEditorTabActivate(path)} className="truncate">
+                              {file.name}
+                              {file.isDirty ? "*" : ""}
+                            </button>
+                            <button type="button" onClick={() => closeEditorFile(path)} className="text-gh-muted hover:text-gh-text">
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="min-h-[420px]">
+                    {editorLoading && !activeEditorFile ? (
+                      <div className="px-4 py-6 text-sm text-gh-muted">Opening file...</div>
+                    ) : activeEditorFile ? (
+                      <MonacoEditor
+                        height="75vh"
+                        theme="vs-dark"
+                        path={activeEditorFile.path}
+                        language={activeEditorFile.language}
+                        value={activeEditorFile.content}
+                        onChange={handleEditorChange}
+                        onMount={(editor) => {
+                          editorRef.current = editor;
+                        }}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          readOnly: isReadOnly
+                        }}
+                      />
+                    ) : (
+                      <div className="px-4 py-6 text-sm text-gh-muted">Select a file to start editing.</div>
+                    )}
+                  </div>
+                </div>
+
+                <aside className="rounded-md border border-gh-border bg-gh-panel p-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gh-text">AI Panel</h3>
+                    <button type="button" onClick={() => setAiPanelOpen((value) => !value)} className="text-xs text-gh-muted hover:text-gh-text">
+                      {aiPanelOpen ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  {aiPanelOpen ? (
+                    <div className="mt-3 space-y-3">
+                      {aiError ? <p className="rounded-md border border-gh-danger/40 bg-gh-danger/10 p-2 text-xs text-gh-danger">{aiError}</p> : null}
+                      {aiLoading ? <p className="text-xs text-gh-muted">Thinking...</p> : null}
+                      {aiResponse ? (
+                        <div className="max-h-[45vh] overflow-auto rounded-md border border-gh-border bg-gh-bg p-2 text-xs text-gh-text whitespace-pre-wrap">
+                          {aiResponse}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gh-muted">Select code and ask AI to see responses here.</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleApplyAi}
+                        disabled={!aiResponse}
+                        className="gh-btn-primary w-full rounded-md px-3 py-2 text-xs font-semibold disabled:opacity-60"
+                      >
+                        Apply to selection
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-gh-muted">AI suggestions are hidden.</p>
+                  )}
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (tab === "actions") {
       const commits = Array.isArray(dashboard?.recent_commits) ? dashboard.recent_commits : [];
 
@@ -716,45 +1230,49 @@ function RepoPage() {
       {error ? <p className="rounded-md border border-gh-danger/40 bg-gh-danger/10 p-3 text-sm text-gh-danger">{error}</p> : null}
       {info ? <p className="rounded-md border border-gh-success/40 bg-gh-success/10 p-3 text-sm text-[#7ee787]">{info}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {tab === "editor" ? (
         <div className="space-y-4">{renderRepoTabBody()}</div>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">{renderRepoTabBody()}</div>
 
-        <aside className="space-y-4">
-          <div className="rounded-md border border-gh-border bg-gh-panel p-4">
-            <h3 className="text-xl font-semibold">About</h3>
-            <p className="mt-3 text-sm leading-6 text-gh-muted">
-              Automation-first Git repository powered by Sh*thub. Use this page to monitor repository state and jobs.
-            </p>
+          <aside className="space-y-4">
+            <div className="rounded-md border border-gh-border bg-gh-panel p-4">
+              <h3 className="text-xl font-semibold">About</h3>
+              <p className="mt-3 text-sm leading-6 text-gh-muted">
+                Automation-first Git repository powered by Sh*thub. Use this page to monitor repository state and jobs.
+              </p>
 
-            <div className="mt-4 space-y-2 border-t border-gh-border pt-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-gh-muted">Owner</span>
-                <span className="font-semibold text-gh-text">{decodedOwner}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gh-muted">Repository</span>
-                <span className="font-semibold text-gh-text">{decodedName}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gh-muted">Branches</span>
-                <span className="text-gh-text">{dashboard?.branches?.length || 0}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gh-muted">Last Commit</span>
-                <span className="max-w-[180px] truncate text-right text-gh-text">{dashboard?.last_commit || "n/a"}</span>
+              <div className="mt-4 space-y-2 border-t border-gh-border pt-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-gh-muted">Owner</span>
+                  <span className="font-semibold text-gh-text">{decodedOwner}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gh-muted">Repository</span>
+                  <span className="font-semibold text-gh-text">{decodedName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gh-muted">Branches</span>
+                  <span className="text-gh-text">{dashboard?.branches?.length || 0}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gh-muted">Last Commit</span>
+                  <span className="max-w-[180px] truncate text-right text-gh-text">{dashboard?.last_commit || "n/a"}</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="rounded-md border border-gh-border bg-gh-panel p-4">
-            <h3 className="text-sm font-semibold text-gh-text">Clone</h3>
-            <p className="mt-2 break-all rounded-md border border-gh-border bg-gh-bg p-2 text-xs text-gh-muted">{cloneUrl}</p>
-            <button type="button" onClick={handleCopyClone} className="gh-btn mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold">
-              {copiedClone ? "Copied" : "Copy clone URL"}
-            </button>
-          </div>
-        </aside>
-      </div>
+            <div className="rounded-md border border-gh-border bg-gh-panel p-4">
+              <h3 className="text-sm font-semibold text-gh-text">Clone</h3>
+              <p className="mt-2 break-all rounded-md border border-gh-border bg-gh-bg p-2 text-xs text-gh-muted">{cloneUrl}</p>
+              <button type="button" onClick={handleCopyClone} className="gh-btn mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold">
+                {copiedClone ? "Copied" : "Copy clone URL"}
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       <JobLogsModal isOpen={logsOpen} onClose={closeLogs} loading={logsLoading} error={logsError} logsData={logsData} />
 

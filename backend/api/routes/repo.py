@@ -12,6 +12,12 @@ class BuildWithAIRequest(BaseModel):
     prompt: str
 
 
+class SaveBlobRequest(BaseModel):
+    path: str
+    content: str
+    message: str | None = None
+
+
 @router.post("/{owner}/{name}")
 def create_repo(owner: str, name: str, _=Depends(require_owner_match)):
     return service.create_repo(owner, name)
@@ -79,6 +85,26 @@ def repo_tree(owner: str, name: str, path: str = ""):
 @router.get("/{owner}/{name}/blob")
 def repo_blob(owner: str, name: str, path: str):
     return _repo_blob(owner, name, path)
+
+
+@router.put("/{owner}/{name}/blob")
+def save_repo_blob(owner: str, name: str, payload: SaveBlobRequest, _=Depends(require_owner_match)):
+    try:
+        return service.save_blob(
+            owner=owner,
+            name=name,
+            path=payload.path,
+            content=payload.content,
+            message=payload.message,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 400
+        if detail in {"Repo not found", "Repo path missing"}:
+            status_code = 404
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="Failed to save file") from exc
 
 
 @router.get("/repos/{owner}/{name}/dashboard", include_in_schema=False)

@@ -138,6 +138,13 @@ export function getRepoBlob(owner, name, path) {
   return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/blob?${params.toString()}`);
 }
 
+export function saveRepoBlob(owner, name, path, content, message = null) {
+  return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/blob`, {
+    method: "PUT",
+    body: JSON.stringify({ path, content, message })
+  });
+}
+
 export function listRepoJobs(owner, name) {
   return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/jobs`);
 }

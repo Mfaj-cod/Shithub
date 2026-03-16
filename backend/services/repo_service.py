@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 from pathlib import Path
 import uuid
 from backend.infra.database import SessionLocal
@@ -11,6 +12,28 @@ git = GitManager()
 
 class RepoService:
     MAX_BLOB_VIEW_BYTES = 200_000
+
+    def _get_repo_with_path(self, owner: str, name: str) -> tuple[Repo, Path]:
+        db = SessionLocal()
+        try:
+            repo = db.query(Repo).filter_by(owner=owner, name=name).first()
+            if not repo:
+                raise ValueError("Repo not found")
+
+            repo_path = Path(repo.path)
+            if repo_path.exists():
+                return repo, repo_path
+
+            expected_path = git.repo_path(owner, name)
+            if not expected_path.exists():
+                git.create_bare_repo(owner, name)
+
+            repo.path = str(expected_path)
+            db.commit()
+            db.refresh(repo)
+            return repo, expected_path
+        finally:
+            db.close()
 
     def create_repo(self, owner: str, name: str):
         path = git.create_bare_repo(owner, name)
@@ -98,26 +121,21 @@ class RepoService:
 
     def get_dashboard(self, owner: str, name: str):
         db = SessionLocal()
-
-        repo = db.query(Repo).filter_by(owner=owner, name=name).first()
-        if not repo:
+        try:
+            repo = db.query(Repo).filter_by(owner=owner, name=name).first()
+            if not repo:
+                raise ValueError("Repo not found")
+            jobs = (
+                db.query(Job)
+                .filter(Job.repo == f"{owner}/{name}")
+                .order_by(Job.created_at.desc())
+                .limit(10)
+                .all()
+            )
+        finally:
             db.close()
-            raise ValueError("Repo not found")
 
-        jobs = (
-            db.query(Job)
-            .filter(Job.repo == f"{owner}/{name}")
-            .order_by(Job.created_at.desc())
-            .limit(10)
-            .all()
-        )
-
-        db.close()
-
-        repo_path = Path(repo.path)
-
-        if not repo_path.exists():
-            raise ValueError("Repo path missing")
+        repo, repo_path = self._get_repo_with_path(owner, name)
 
         # Git stats (works for bare and non-bare repos, including empty repos)
         branches = self._safe_git_lines(
@@ -176,16 +194,7 @@ class RepoService:
         }
 
     def get_tree(self, owner: str, name: str, path: str = ""):
-        db = SessionLocal()
-        repo = db.query(Repo).filter_by(owner=owner, name=name).first()
-        db.close()
-
-        if not repo:
-            raise ValueError("Repo not found")
-
-        repo_path = Path(repo.path)
-        if not repo_path.exists():
-            raise ValueError("Repo path missing")
+        repo, repo_path = self._get_repo_with_path(owner, name)
 
         normalized_path = self._normalize_tree_path(path)
         treeish = "HEAD"
@@ -233,16 +242,7 @@ class RepoService:
         }
 
     def get_blob(self, owner: str, name: str, path: str):
-        db = SessionLocal()
-        repo = db.query(Repo).filter_by(owner=owner, name=name).first()
-        db.close()
-
-        if not repo:
-            raise ValueError("Repo not found")
-
-        repo_path = Path(repo.path)
-        if not repo_path.exists():
-            raise ValueError("Repo path missing")
+        repo, repo_path = self._get_repo_with_path(owner, name)
 
         normalized_path = self._normalize_tree_path(path)
         if not normalized_path:
@@ -279,6 +279,72 @@ class RepoService:
             "line_count": line_count,
             "max_view_bytes": self.MAX_BLOB_VIEW_BYTES,
         }
+
+    def save_blob(self, owner: str, name: str, path: str, content: str, message: str | None = None):
+        repo, repo_path = self._get_repo_with_path(owner, name)
+
+        normalized_path = self._normalize_tree_path(path)
+        if not normalized_path:
+            raise ValueError("Invalid path")
+
+        def _run_git(cmd: list[str], cwd: Path):
+            try:
+                return subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError(exc.stderr or exc.stdout or "Git command failed") from exc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+
+            _run_git(["git", "clone", str(repo_path), str(tmp_path)], cwd=tmp_path.parent)
+
+            target = (tmp_path / normalized_path).resolve()
+            try:
+                target.relative_to(tmp_path.resolve())
+            except ValueError as exc:
+                raise ValueError("Invalid path") from exc
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content or "", encoding="utf-8")
+
+            _run_git(["git", "add", "-A"], cwd=tmp_path)
+
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+            )
+            if not status_result.stdout.strip():
+                return {"path": normalized_path, "commit": None, "status": "no_changes"}
+
+            commit_message = (message or f"web editor: update {normalized_path}").strip()
+            commit_message = commit_message[:180] or f"web editor: update {normalized_path}"
+
+            _run_git(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Shithub-Web",
+                    "-c",
+                    "user.email=web@shithub.local",
+                    "commit",
+                    "-m",
+                    commit_message,
+                ],
+                cwd=tmp_path,
+            )
+
+            _run_git(["git", "push"], cwd=tmp_path)
+
+            commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+            return {"path": normalized_path, "commit": commit_hash, "status": "saved"}
 
     @staticmethod
     def _safe_git_output(repo_path: Path, cmd: list[str]) -> str:
