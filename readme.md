@@ -11,6 +11,7 @@ It supports repository hosting over Smart HTTP, async AI automations (README + c
 - AI README generation jobs with status and logs
 - sh*tAI build jobs from natural-language prompts
 - bugAI coding assistant page for Q&A with optional repo context
+- Monaco-based web editor with multi-file tabs and Save & Commit
 - Web UI + CLI workflows
 
 ## Architecture
@@ -111,11 +112,12 @@ Mutation endpoints are owner-protected: authenticated users can only mutate repo
 ## Web Usage
 1. Sign in and open `/` for the logged-in dashboard.
 2. Use repository pages under `/u/:owner/repositories`.
-3. Queue AI jobs from:
+3. Edit code in the Monaco-based editor tab (`/repo/:owner/:name/editor`) and Save & Commit.
+4. Queue AI jobs from:
    - `Generate README`
    - `Build with sh*tAI`
-4. Track jobs/logs in `/repo/:owner/:name/actions`.
-5. Use `/bugai` for coding Q&A with optional repository context.
+5. Track jobs/logs in `/repo/:owner/:name/actions`.
+6. Use `/bugai` for coding Q&A with optional repository context.
 
 ## CLI Usage
 Install CLI:
@@ -145,6 +147,7 @@ shithub job <job_id>
 | `GET` | `/repos/{owner}/{name}/dashboard` | Repo dashboard |
 | `GET` | `/repos/{owner}/{name}/tree` | Repo tree at optional path |
 | `GET` | `/repos/{owner}/{name}/blob` | File blob content |
+| `PUT` | `/repos/{owner}/{name}/blob` | Save file content (commit + push) |
 | `POST` | `/repos/{owner}/{name}/ai/readme` | Queue README job |
 | `POST` | `/repos/{owner}/{name}/ai/build` | Queue sh*tAI build job |
 | `GET` | `/repos/{owner}/{name}/jobs` | Repository jobs |
