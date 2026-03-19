@@ -1,4 +1,5 @@
 import ast
+import difflib
 import json
 import re
 import warnings
@@ -21,6 +22,9 @@ MAX_JSON_ATTEMPTS = 3
 MAX_BUGAI_HISTORY_ITEMS = 12
 MAX_BUGAI_PROMPT_CHARS = 4000
 MAX_BUGAI_MESSAGE_CHARS = 2000
+MAX_AUTOCOMPLETE_PREFIX_CHARS = 6000
+MAX_AUTOCOMPLETE_SUFFIX_CHARS = 1200
+MAX_COMMIT_DIFF_LINES = 220
 
 
 class BugAIServiceError(Exception):
@@ -333,6 +337,15 @@ Input text:
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
+    @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        cleaned = (text or "").strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if len(lines) >= 3 and lines[0].startswith("```") and lines[-1].strip() == "```":
+                cleaned = "\n".join(lines[1:-1]).strip()
+        return cleaned
+
     def _resolve_bugai_context(
         self,
         owner: str | None,
@@ -435,6 +448,184 @@ Input text:
 
         return {
             "answer": clean_answer,
+            "model": settings.BUGAI_MODEL,
+            "context_used": context_used,
+            "context_repo": context_repo,
+        }
+
+    def autocomplete_code(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        prefix: str,
+        suffix: str = "",
+        language: str = "",
+        current_username: str = "",
+    ) -> dict[str, Any]:
+        if not current_username:
+            raise BugAIServiceError(status_code=401, detail="Not authenticated")
+
+        normalized_path = (path or "").strip()
+        if not normalized_path:
+            raise BugAIServiceError(status_code=400, detail="File path is required")
+
+        bounded_prefix = (prefix or "")[-MAX_AUTOCOMPLETE_PREFIX_CHARS:]
+        bounded_suffix = (suffix or "")[:MAX_AUTOCOMPLETE_SUFFIX_CHARS]
+        if not bounded_prefix and not bounded_suffix:
+            raise BugAIServiceError(status_code=400, detail="Editor context is required")
+
+        context_used, context_repo, context_text = self._resolve_bugai_context(owner, repo, current_username)
+
+        system_prompt = (
+            "You are bugAI autocomplete mode. "
+            "Return only raw code that should be inserted at the cursor. "
+            "Do not include markdown fences, explanations, or surrounding prose."
+        )
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if context_used and context_text:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Use this repository context to improve completion quality. "
+                        "Only rely on it when helpful.\n\n"
+                        f"{context_text}"
+                    ),
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"File path: {normalized_path}\n"
+                    f"Language: {(language or 'unknown').strip()}\n"
+                    "Complete code at the cursor.\n"
+                    "Text before cursor:\n"
+                    f"{bounded_prefix}\n\n"
+                    "Text after cursor:\n"
+                    f"{bounded_suffix}"
+                ),
+            }
+        )
+
+        if not self.bugai_client:
+            raise BugAIServiceError(status_code=500, detail="bugAI client is not configured")
+
+        try:
+            answer = self._chat_completion(
+                messages=messages,
+                temperature=0.2,
+                json_mode=False,
+                model=settings.BUGAI_MODEL,
+                client=self.bugai_client,
+            )
+        except Exception as exc:
+            raise BugAIServiceError(status_code=500, detail="Autocomplete request failed") from exc
+
+        completion = self._strip_markdown_fences(answer).strip("\n")
+        if not completion:
+            raise BugAIServiceError(status_code=500, detail="Autocomplete returned an empty result")
+
+        return {
+            "completion": completion,
+            "model": settings.BUGAI_MODEL,
+            "context_used": context_used,
+            "context_repo": context_repo,
+        }
+
+    def generate_commit_message(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        before: str,
+        after: str,
+        current_username: str = "",
+    ) -> dict[str, Any]:
+        if not current_username:
+            raise BugAIServiceError(status_code=401, detail="Not authenticated")
+
+        normalized_path = (path or "").strip()
+        if not normalized_path:
+            raise BugAIServiceError(status_code=400, detail="File path is required")
+
+        before_text = before or ""
+        after_text = after or ""
+        fallback_message = f"web editor: update {Path(normalized_path).name or normalized_path}"
+        if before_text == after_text:
+            return {
+                "message": fallback_message,
+                "model": settings.BUGAI_MODEL,
+                "context_used": False,
+                "context_repo": None,
+            }
+
+        context_used, context_repo, context_text = self._resolve_bugai_context(owner, repo, current_username)
+
+        diff_lines = list(
+            difflib.unified_diff(
+                before_text.splitlines(),
+                after_text.splitlines(),
+                fromfile=f"a/{normalized_path}",
+                tofile=f"b/{normalized_path}",
+                lineterm="",
+            )
+        )
+        bounded_diff = "\n".join(diff_lines[:MAX_COMMIT_DIFF_LINES])
+
+        system_prompt = (
+            "You write concise git commit messages. "
+            "Return exactly one plain text line, no quotes, no markdown, max 72 characters."
+        )
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if context_used and context_text:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Repository context is provided below. Use it if helpful.\n\n"
+                        f"{context_text}"
+                    ),
+                }
+            )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Generate a commit message for file: {normalized_path}\n"
+                    "Diff:\n"
+                    f"{bounded_diff}"
+                ),
+            }
+        )
+
+        if not self.bugai_client:
+            raise BugAIServiceError(status_code=500, detail="bugAI client is not configured")
+
+        try:
+            answer = self._chat_completion(
+                messages=messages,
+                temperature=0.1,
+                json_mode=False,
+                model=settings.BUGAI_MODEL,
+                client=self.bugai_client,
+            )
+        except Exception as exc:
+            raise BugAIServiceError(status_code=500, detail="Commit message request failed") from exc
+
+        clean = self._strip_markdown_fences(answer).splitlines()[0].strip() if answer else ""
+        clean = clean.strip("\"'")
+        clean = re.sub(r"^[*-]\s*", "", clean).strip()
+        if not clean:
+            clean = fallback_message
+        clean = clean[:72].strip()
+        if not clean:
+            clean = fallback_message
+
+        return {
+            "message": clean,
             "model": settings.BUGAI_MODEL,
             "context_used": context_used,
             "context_repo": context_repo,

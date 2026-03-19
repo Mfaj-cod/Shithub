@@ -119,6 +119,20 @@ export function askBugAi({ prompt, history = [], owner = null, repo = null }) {
   });
 }
 
+export function autocompleteBugAi({ owner, repo, path, prefix, suffix = "", language = "" }) {
+  return request("/ai/bugai/autocomplete", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, path, prefix, suffix, language })
+  });
+}
+
+export function generateCommitMessageAi({ owner, repo, path, before = "", after }) {
+  return request("/ai/bugai/commit-message", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, path, before, after })
+  });
+}
+
 export function getRepoDashboard(owner, name) {
   return request(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/dashboard`);
 }

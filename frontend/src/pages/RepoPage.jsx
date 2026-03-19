@@ -3,7 +3,9 @@ import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } 
 import MonacoEditor, { loader as monacoLoader } from "@monaco-editor/react";
 import {
   API_BASE_URL,
+  autocompleteBugAi,
   askBugAi,
+  generateCommitMessageAi,
   getJobLogs,
   getRepoBlob,
   getRepoDashboard,
@@ -118,6 +120,9 @@ function RepoPage() {
   const [editorSaving, setEditorSaving] = useState(false);
   const [editorError, setEditorError] = useState("");
   const [editorInfo, setEditorInfo] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [aiAutocompleteLoading, setAiAutocompleteLoading] = useState(false);
+  const [aiCommitMessageLoading, setAiCommitMessageLoading] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -133,6 +138,14 @@ function RepoPage() {
     () => `/auth/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`,
     [location.pathname, location.search]
   );
+
+  useEffect(() => {
+    if (!activeEditorFile?.path) {
+      setCommitMessage("");
+      return;
+    }
+    setCommitMessage(`web editor: update ${activeEditorFile.path}`);
+  }, [activeEditorFile?.path]);
 
   useEffect(() => {
     if (!isValidRepoTab(tab)) {
@@ -617,6 +630,113 @@ function RepoPage() {
     });
   };
 
+  const getCursorContext = () => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return null;
+    }
+
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    if (!model || !position) {
+      return null;
+    }
+
+    const fullText = model.getValue() || "";
+    const cursorOffset = model.getOffsetAt(position);
+    const prefix = fullText.slice(Math.max(0, cursorOffset - 6000), cursorOffset);
+    const suffix = fullText.slice(cursorOffset, cursorOffset + 1200);
+
+    return { prefix, suffix };
+  };
+
+  const handleAiAutocomplete = async () => {
+    if (!activeEditorFile) {
+      setEditorError("Open a file to use AI autocomplete.");
+      return;
+    }
+    if (!ensureMutationAccess()) {
+      return;
+    }
+
+    const cursorContext = getCursorContext();
+    if (!cursorContext) {
+      setEditorError("Editor is not ready for autocomplete.");
+      return;
+    }
+
+    setEditorError("");
+    setEditorInfo("");
+    setAiAutocompleteLoading(true);
+
+    try {
+      const result = await autocompleteBugAi({
+        owner: decodedOwner,
+        repo: decodedName,
+        path: activeEditorFile.path,
+        language: activeEditorFile.language,
+        prefix: cursorContext.prefix,
+        suffix: cursorContext.suffix
+      });
+
+      const completion = typeof result?.completion === "string" ? result.completion : "";
+      if (!completion.trim()) {
+        setEditorInfo("AI autocomplete returned no suggestion.");
+        return;
+      }
+
+      const editor = editorRef.current;
+      const selection = editor?.getSelection();
+      if (!editor || !selection) {
+        setEditorError("Editor selection is unavailable.");
+        return;
+      }
+
+      editor.executeEdits("ai-autocomplete", [{ range: selection, text: completion }]);
+      editor.focus();
+      setEditorInfo("AI autocomplete applied at cursor.");
+    } catch (err) {
+      setEditorError(err?.message || "AI autocomplete failed.");
+    } finally {
+      setAiAutocompleteLoading(false);
+    }
+  };
+
+  const handleGenerateCommitMessage = async () => {
+    if (!activeEditorFile) {
+      setEditorError("Open a file first.");
+      return;
+    }
+    if (!ensureMutationAccess()) {
+      return;
+    }
+
+    setEditorError("");
+    setEditorInfo("");
+    setAiCommitMessageLoading(true);
+
+    try {
+      const result = await generateCommitMessageAi({
+        owner: decodedOwner,
+        repo: decodedName,
+        path: activeEditorFile.path,
+        before: activeEditorFile.originalContent || "",
+        after: activeEditorFile.content || ""
+      });
+      const message = typeof result?.message === "string" ? result.message.trim() : "";
+      if (!message) {
+        setEditorInfo("AI commit message returned empty output.");
+        return;
+      }
+      setCommitMessage(message);
+      setEditorInfo("AI commit message generated.");
+    } catch (err) {
+      setEditorError(err?.message || "Failed to generate AI commit message.");
+    } finally {
+      setAiCommitMessageLoading(false);
+    }
+  };
+
   const handleEditorSave = async () => {
     if (!activeEditorFile) {
       return;
@@ -636,7 +756,13 @@ function RepoPage() {
     setEditorSaving(true);
 
     try {
-      const result = await saveRepoBlob(decodedOwner, decodedName, activeEditorFile.path, activeEditorFile.content);
+      const result = await saveRepoBlob(
+        decodedOwner,
+        decodedName,
+        activeEditorFile.path,
+        activeEditorFile.content,
+        commitMessage.trim() || null
+      );
       if (result?.status === "no_changes") {
         setEditorInfo("No changes to save.");
       } else {
@@ -681,7 +807,7 @@ function RepoPage() {
     return model.getValueInRange(selection);
   };
 
-  const handleAiRequest = async (mode) => {
+  const handleAiRequest = async () => {
     if (!activeEditorFile) {
       setAiError("Open a file to ask AI.");
       setAiPanelOpen(true);
@@ -703,11 +829,7 @@ function RepoPage() {
     setAiError("");
     setAiResponse("");
 
-    const header =
-      mode === "bugai"
-        ? "Debug and fix the selected code. Return only the corrected code."
-        : "Improve the selected code. Return only the updated code.";
-    const prompt = `${header}\nRepository: ${decodedOwner}/${decodedName}\nFile: ${activeEditorFile.path}\nSelected code:\n${selected}`;
+    const prompt = `Debug and fix the selected code. Return only the corrected code.\nRepository: ${decodedOwner}/${decodedName}\nFile: ${activeEditorFile.path}\nSelected code:\n${selected}`;
 
     try {
       const result = await askBugAi({ prompt, history: [], owner: decodedOwner, repo: decodedName });
@@ -983,29 +1105,47 @@ function RepoPage() {
                   <button
                     type="button"
                     onClick={handleEditorSave}
-                    disabled={!activeEditorFile || !activeEditorFile.isDirty || isReadOnly || editorSaving}
+                    disabled={!activeEditorFile || !activeEditorFile.isDirty || isReadOnly || editorSaving || aiCommitMessageLoading}
                     className="gh-btn-primary rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
                   >
                     {editorSaving ? "Saving..." : "Save & Commit"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleAiRequest("shitai")}
-                    disabled={!activeEditorFile}
+                    onClick={handleAiAutocomplete}
+                    disabled={!activeEditorFile || isReadOnly || aiAutocompleteLoading}
                     className="gh-btn rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
                   >
-                    Ask Sh*tAI
+                    {aiAutocompleteLoading ? "Autocompleting..." : "AI Autocomplete"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleAiRequest("bugai")}
-                    disabled={!activeEditorFile}
+                    onClick={handleAiRequest}
+                    disabled={!activeEditorFile || isReadOnly}
                     className="gh-btn rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
                   >
                     Debug with BugAI
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateCommitMessage}
+                    disabled={!activeEditorFile || !activeEditorFile.isDirty || aiCommitMessageLoading}
+                    className="gh-btn rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+                  >
+                    {aiCommitMessageLoading ? "Thinking..." : "AI Commit Message"}
+                  </button>
                 </div>
                 <span className="text-xs text-gh-muted">{activeEditorFile?.path || "No file selected"}</span>
+              </div>
+
+              <div className="rounded-md border border-gh-border bg-gh-panel p-3">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gh-muted">Commit message</label>
+                <input
+                  value={commitMessage}
+                  onChange={(event) => setCommitMessage(event.target.value)}
+                  placeholder="web editor: update file"
+                  className="w-full rounded-md border border-gh-border bg-gh-bg px-3 py-2 text-sm text-gh-text outline-none ring-gh-accent focus:ring-1"
+                />
               </div>
 
               {isReadOnly ? (
@@ -1038,7 +1178,7 @@ function RepoPage() {
                               {file.isDirty ? "*" : ""}
                             </button>
                             <button type="button" onClick={() => closeEditorFile(path)} className="text-gh-muted hover:text-gh-text">
-                              ×
+                              x
                             </button>
                           </div>
                         );
@@ -1293,3 +1433,4 @@ function RepoPage() {
 }
 
 export default RepoPage;
+
