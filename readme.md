@@ -12,6 +12,8 @@ It supports repository hosting over Smart HTTP, async AI automations (README + c
 - sh*tAI build jobs from natural-language prompts
 - bugAI coding assistant page for Q&A with optional repo context
 - Monaco-based web editor with multi-file tabs and Save & Commit
+- AI autocomplete in editor (insert-at-cursor suggestions)
+- AI-generated commit messages in editor save flow
 - Web UI + CLI workflows
 
 ## Architecture
@@ -113,11 +115,15 @@ Mutation endpoints are owner-protected: authenticated users can only mutate repo
 1. Sign in and open `/` for the logged-in dashboard.
 2. Use repository pages under `/u/:owner/repositories`.
 3. Edit code in the Monaco-based editor tab (`/repo/:owner/:name/editor`) and Save & Commit.
-4. Queue AI jobs from:
+4. Use editor AI helpers:
+   - `AI Autocomplete` for insert-at-cursor code completion
+   - `AI Commit Message` to generate commit subject from current file changes
+   - `Debug with BugAI` to get fix suggestions for selected code
+5. Queue AI jobs from:
    - `Generate README`
    - `Build with sh*tAI`
-5. Track jobs/logs in `/repo/:owner/:name/actions`.
-6. Use `/bugai` for coding Q&A with optional repository context.
+6. Track jobs/logs in `/repo/:owner/:name/actions`.
+7. Use `/bugai` for coding Q&A with optional repository context.
 
 ## CLI Usage
 Install CLI:
@@ -154,6 +160,8 @@ shithub job <job_id>
 | `GET` | `/jobs/{job_id}` | Job status |
 | `GET` | `/jobs/{job_id}/logs` | Job logs |
 | `POST` | `/ai/bugai/ask` | bugAI coding Q&A |
+| `POST` | `/ai/bugai/autocomplete` | Editor AI autocomplete |
+| `POST` | `/ai/bugai/commit-message` | AI commit message generation |
 
 ## Backward Compatibility (Deprecated Aliases)
 - `GET /repos/repos/{owner}/{name}/dashboard`
@@ -169,6 +177,8 @@ Use canonical routes for new integrations.
 - Clone repo using Smart HTTP.
 - Run `Generate README` and inspect logs.
 - Run `Build with sh*tAI` and inspect logs.
+- In editor tab, verify AI autocomplete inserts completion at cursor.
+- In editor tab, verify AI commit message populates commit input and Save & Commit works.
 - Open `/bugai` and ask coding questions with and without repo context.
 
 ## Troubleshooting
