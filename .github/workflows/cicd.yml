@@ -23,6 +23,9 @@ jobs:
       - name: Backend smoke compile
         run: python -m compileall backend cli
 
+      - name: Backend and CLI tests
+        run: PYTHONPATH=. pytest tests/
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
