@@ -68,7 +68,7 @@ This repo now includes:
 - `Dockerfile.backend` (FastAPI via Gunicorn + Celery worker in same container)
 - `Dockerfile.frontend` (Vite build + Nginx SPA serving + `/api/*` proxy)
 - `render.yaml` (Render Blueprint: API, Frontend, Redis)
-- `.github/workflows/render-cicd.yml` (CI checks + deploy hook triggers)
+- `.github/workflows/cicd.yml` (CI checks + deploy hook triggers)
 
 ### 1. Create services with Render Blueprint
 1. Push this repo to GitHub.
@@ -91,8 +91,9 @@ If you rename services, update:
 in `render.yaml` to match your real Render domains.
 
 ### 4. Enable GitHub Actions deploy hooks (optional but recommended)
-The workflow `.github/workflows/render-cicd.yml` runs on PR/push:
+The workflow `.github/workflows/cicd.yml` runs on PR/push:
 - backend compile smoke checks
+- backend + CLI tests via pytest
 - frontend build + tests
 - deploy hook trigger on `main`
 
@@ -137,6 +138,14 @@ shithub create <owner> <name>
 shithub list <owner>
 shithub ai-readme <owner> <name>
 shithub job <job_id>
+```
+
+## Testing
+We use `pytest` for backend API and CLI tests. Tests are located in the `/tests` folder and auto-run in CI.
+To run tests locally:
+```bash
+pip install pytest responses httpx
+PYTHONPATH=. pytest tests/
 ```
 
 ## API Reference (Canonical)
